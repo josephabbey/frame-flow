@@ -45,6 +45,21 @@ Device → server (relayed to phone? Actually device sends to server, server rel
 - `api/server.ts`: fetch upgrade, open/close, message switch, OAuth callback `/oauth/google/callback` sends `google.account.authorization_code` to device.
 - Special device cases: `google.account.authorization_url` placeholder replacement; `web.request_json` proxy.
 
+## Additional message types (new device protocol)
+
+Request/response (device handlers):
+- `settings.list_components` → `{ components: {key: {name,details}} }`
+- `settings.set` → `{ component, key, value }`
+- `data.photos.list_albums` → `{ albums: [...] }`
+- `google.account.authorization_url` → `{ url }`
+- `google.picker.select` → `{ albumId?, title?, maxItemCount? }` returns `{ albumId, title, sessionId, pickerUri }`
+
+One-way device → phone:
+- `google.photos.picker.cancelled`: `{ albumId }`
+- `google.photos.picker.completed`: `{ albumId, title?, photoCount, addedCount }` or `{ albumId: null, photoCount: 0 }`
+- `google.photos.picker.error`: `{ albumId?, message }`
+- `pong`
+
 ## Device handling locations
 
 - `src/frame/flow/client.py`: connection lifecycle, dispatch by type, req_id resolution.
