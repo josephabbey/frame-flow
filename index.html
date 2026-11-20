@@ -4,10 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f3f1" />
-    <title>Frame · Your photos, at home</title>
+    <title>Frame</title>
+
+    <style>
+      html {
+        height: 100%;
+      }
+
+      body {
+        height: -webkit-fill-available;
+        font-family: Roboto, sans-serif;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <app-root></app-root>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

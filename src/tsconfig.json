@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": [],
+    "plugins": [
+      {
+        "name": "ts-lit-plugin",
+        "strict": true,
+      },
+    ],
+  },
+  "include": ["./**/*"],
+}

@@ -1,0 +1,2 @@
+export const GOOGLE_CLIENT_ID = process.env.BUN_PUBLIC_GOOGLE_CLIENT_ID!;
+export const GOOGLE_REDIRECT_URI = process.env.BUN_PUBLIC_GOOGLE_REDIRECT_URI!;
