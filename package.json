@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot api/server.ts",
-    "build": "bun build ./index.html --outdir=dist",
+    "build": "bun build ./index.html --outdir=dist --env=inline",
     "vercel-build": "bun run build",
     "lint": "bunx eslint src api",
     "format": "bun fmt .",
