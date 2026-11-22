@@ -9,12 +9,14 @@ let reqId = 0;
 
 export type FlowMessage = { type: string } & Record<string, unknown>;
 
-function isFlowMessage(message: unknown): message is FlowMessage {
-  return (
-    typeof message === "object" &&
-    message !== null &&
-    typeof (message as FlowMessage).type === "string"
-  );
+function isRecord(message: unknown): message is Record<string, unknown> {
+  return typeof message === "object" && message !== null;
+}
+
+function isFlowMessage(
+  message: Record<string, unknown>,
+): message is FlowMessage {
+  return typeof message.type === "string";
 }
 
 type RegisteredCallback = (payload: FlowMessage) => void | Promise<void>;
@@ -38,7 +40,6 @@ class FlowClient {
   // socket for a key when a newer one connects.
   private _reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private _reconnectAttempts = 0;
-  private readonly _maxReconnectAttempts = 10;
 
   websocketUrl(): string {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
@@ -62,28 +63,25 @@ class FlowClient {
       this._reconnectAttempts = 0;
       this._reconnectTimeout = null;
     });
-    socket.addEventListener("close", () => {
-      // Only react to the closure of the socket we consider current;
-      // a socket closed to make way for a replacement is ignored.
+    socket.addEventListener("close", (event) => {
+      // Ignore closures from sockets superseded locally by a newer connection.
       if (this._connection !== socket) return;
       this.deviceConnected.clear();
       this.flowConnected.clear();
       this._connection = null;
+      console.warn(`Flow socket closed (${event.code}): ${event.reason}`);
       for (const [reqIdVal, request] of Object.entries(this.outstandingReqs)) {
         clearTimeout(request.timeout);
         request.reject(new Error("Flow connection closed"));
         delete this.outstandingReqs[Number(reqIdVal)];
       }
+      if (event.code === 4001) return;
       this._scheduleReconnect();
     });
   }
 
   private _scheduleReconnect() {
-    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
-      console.warn("Flow: max reconnect attempts reached, giving up");
-      return;
-    }
-    const delay = Math.min(1000 * 2 ** this._reconnectAttempts, 30_000);
+    const delay = Math.min(1000 * 2 ** this._reconnectAttempts, 5_000);
     console.info(`Flow: reconnecting in ${delay}ms`);
     this._reconnectTimeout = setTimeout(() => {
       this._reconnectAttempts += 1;
@@ -123,17 +121,17 @@ class FlowClient {
       throw new Error("WebSocket is not connected");
     }
     const p = { ...payload };
-    reqId += 1;
-    p.req_id = reqId;
+    const requestId = ++reqId;
+    p.req_id = requestId;
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
     const timeout = setTimeout(() => {
-      const request = this.outstandingReqs[reqId];
+      const request = this.outstandingReqs[requestId];
       if (request) {
         request.reject(new Error("Flow request timed out"));
-        delete this.outstandingReqs[reqId];
+        delete this.outstandingReqs[requestId];
       }
     }, 15_000);
-    this.outstandingReqs[reqId] = { resolve, reject, timeout };
+    this.outstandingReqs[requestId] = { resolve, reject, timeout };
     this._connection.send(JSON.stringify(p));
     return promise;
   }
@@ -164,16 +162,22 @@ class FlowClient {
       return;
     }
     console.log(message);
-    if (!isFlowMessage(message)) return;
+    if (!isRecord(message)) return;
 
-    const reqIdVal = message.res_req_id as number | undefined;
-    if (reqIdVal !== undefined && this.outstandingReqs[reqIdVal]) {
-      const { resolve, timeout } = this.outstandingReqs[reqIdVal];
+    const responseId = message.res_req_id;
+    if (
+      typeof responseId === "number" &&
+      Number.isSafeInteger(responseId) &&
+      this.outstandingReqs[responseId]
+    ) {
+      const { resolve, timeout } = this.outstandingReqs[responseId];
       clearTimeout(timeout);
-      delete this.outstandingReqs[reqIdVal];
+      delete this.outstandingReqs[responseId];
       resolve(message);
       return;
     }
+
+    if (!isFlowMessage(message)) return;
 
     const msgType = message.type;
     if (msgType === "device_connected") {

@@ -188,9 +188,11 @@ const server = Bun.serve({
         previous?.close(4001, "replaced by a newer connection");
         phones.set(socket.data.hash, socket);
         socket.subscribe(socket.data.hash);
-        devices
-          .get(socket.data.hash)
-          ?.send(JSON.stringify({ type: "phone_connected" }));
+        const device = devices.get(socket.data.hash);
+        if (device) {
+          device.send(JSON.stringify({ type: "phone_connected" }));
+          socket.send(JSON.stringify({ type: "device_already_connected" }));
+        }
       }
     },
     message(socket, msg) {
