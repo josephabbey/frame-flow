@@ -24,13 +24,21 @@ export class AppRoot extends LitElement {
   }
 
   async googleAuth() {
-    let { url } = await FLOW_CLIENT.sendMessageRequest(
+    const response = await FLOW_CLIENT.sendMessageRequest(
       "google.account.authorization_url",
     );
-    url = url
+    if (typeof response !== "object" || response === null) {
+      throw new Error("Invalid Google authorization response");
+    }
+    const urlValue = Reflect.get(response, "url");
+    if (typeof urlValue !== "string") {
+      throw new Error("Invalid Google authorization response");
+    }
+    const url = urlValue;
+    const authorizeUrl = url
       .replace("__CLIENT_ID", GOOGLE_CLIENT_ID)
       .replace("__REDIRECT_URI", GOOGLE_REDIRECT_URI);
-    window.location.href = `${url}&state=${FLOW_KEY}`;
+    window.location.href = `${authorizeUrl}&state=${FLOW_KEY}`;
   }
 
   protected render() {

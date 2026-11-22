@@ -1,24 +1,126 @@
 import type { ServerWebSocket } from "bun";
 import { createHash } from "crypto";
 import homepage from "../index.html";
-import LICENSE from "../LICENSE" with { type: "text" };
 import pairpage from "../pair.html";
 
-const GOOGLE_CLIENT_ID = Bun.env.GOOGLE_CLIENT_ID!;
-const GOOGLE_CLIENT_SECRET = Bun.env.GOOGLE_CLIENT_SECRET!;
-const GOOGLE_REDIRECT_URI = Bun.env.GOOGLE_REDIRECT_URI!;
+function requiredEnv(name: string): string {
+  const value = Bun.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+
+const GOOGLE_CLIENT_ID = requiredEnv("GOOGLE_CLIENT_ID");
+const GOOGLE_CLIENT_SECRET = requiredEnv("GOOGLE_CLIENT_SECRET");
+const GOOGLE_REDIRECT_URI = requiredEnv("GOOGLE_REDIRECT_URI");
 
 type SocketData = { hash: string; role: "device" | "phone" };
 
 const devices = new Map<string, ServerWebSocket<SocketData>>();
 const phones = new Map<string, ServerWebSocket<SocketData>>();
 
+interface WebRequestMessage {
+  type: "web.request_json";
+  method: string;
+  url: string;
+  data: unknown;
+  req_id: unknown;
+  headers?: Record<string, string>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isWebRequestMessage(value: unknown): value is WebRequestMessage {
+  if (!isRecord(value) || value.type !== "web.request_json") return false;
+  if (
+    typeof value.method !== "string" ||
+    typeof value.url !== "string" ||
+    !("req_id" in value)
+  )
+    return false;
+  if (value.headers !== undefined) {
+    if (!isRecord(value.headers)) return false;
+    if (
+      !Object.values(value.headers).every(
+        (header) => typeof header === "string",
+      )
+    )
+      return false;
+  }
+  return true;
+}
+
+async function licenseResponse(): Promise<Response> {
+  return new Response(
+    await Bun.file(new URL("../LICENSE", import.meta.url)).text(),
+  );
+}
+
+async function executeWebRequest(
+  socket: ServerWebSocket<SocketData>,
+  message: WebRequestMessage,
+): Promise<void> {
+  try {
+    let requestUrl = new URL(message.url);
+    let body =
+      message.data === undefined ? undefined : JSON.stringify(message.data);
+
+    if (requestUrl.origin.endsWith(".googleapis.com")) {
+      requestUrl = new URL(
+        requestUrl
+          .toString()
+          .replace("__CLIENT_ID", GOOGLE_CLIENT_ID)
+          .replace("__CLIENT_SECRET", GOOGLE_CLIENT_SECRET)
+          .replace("__REDIRECT_URI", GOOGLE_REDIRECT_URI),
+      );
+      body = body
+        ?.replace("__CLIENT_ID", GOOGLE_CLIENT_ID)
+        .replace("__CLIENT_SECRET", GOOGLE_CLIENT_SECRET)
+        .replace("__REDIRECT_URI", GOOGLE_REDIRECT_URI);
+    }
+
+    console.log(`Request: ${message.method} ${requestUrl}`);
+    const response = await fetch(requestUrl, {
+      method: message.method,
+      body,
+      headers: message.headers,
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    let data: unknown;
+    const contentType = response.headers.get("content-type");
+    if (contentType?.includes("application/json")) {
+      data = await response.json();
+    } else {
+      data = await response.text();
+    }
+
+    socket.send(
+      JSON.stringify({
+        status: response.status,
+        data,
+        res_req_id: message.req_id,
+      }),
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Request failed";
+    socket.send(
+      JSON.stringify({
+        status: 0,
+        error: reason,
+        res_req_id: message.req_id,
+      }),
+    );
+  }
+}
+
 const server = Bun.serve({
   port: Number(process.env.PORT || 3000),
   routes: {
     "/": homepage,
     "/pair": pairpage,
-    "/LICENSE": new Response(LICENSE),
+    "/LICENSE": licenseResponse,
   },
   async fetch(request, server) {
     const url = new URL(request.url);
@@ -40,13 +142,23 @@ const server = Bun.serve({
 
     // TODO: better validation
     if (url.pathname === "/oauth/google/callback") {
-      devices.get(hash(url.searchParams.get("state"))).send(
-        JSON.stringify({
-          type: "google.account.authorization_code",
-          code: url.searchParams.get("code"),
-        }),
-      );
-      return Response.redirect(`/?key=${url.searchParams.get("state")}`);
+      const state = url.searchParams.get("state");
+      const code = url.searchParams.get("code");
+      if (!state || !code) {
+        return new Response("Missing OAuth callback parameters", {
+          status: 400,
+        });
+      }
+      const device = devices.get(hash(state));
+      if (device) {
+        device.send(
+          JSON.stringify({
+            type: "google.account.authorization_code",
+            code,
+          }),
+        );
+      }
+      return Response.redirect(`/?key=${encodeURIComponent(state)}`);
     }
 
     console.log(
@@ -82,7 +194,13 @@ const server = Bun.serve({
       }
     },
     message(socket, msg) {
-      const message = JSON.parse(msg.toString()) as unknown;
+      let message: unknown;
+      try {
+        message = JSON.parse(msg.toString());
+      } catch {
+        console.warn("Received invalid JSON over WebSocket");
+        return;
+      }
       console.log("Message", socket.data, message);
       if (socket.data.role === "device") {
         // Handle specific cases
@@ -94,48 +212,10 @@ const server = Bun.serve({
         ) {
           switch (message.type) {
             case "web.request_json":
-              if (
-                "method" in message &&
-                typeof message.method === "string" &&
-                "url" in message &&
-                typeof message.url === "string" &&
-                "data" in message &&
-                "req_id" in message
-              ) {
-                const method = message.method ?? "GET";
-                let url = new URL(message.url);
-                let body = JSON.stringify(message.data);
-                const headers = message.headers ?? undefined;
-                console.log(
-                  `Request: ${method} ${url} ${headers} ${message.data}`,
-                );
-
-                if (url.origin.endsWith(".googleapis.com")) {
-                  url = new URL(
-                    url
-                      .toString()
-                      .replace("__CLIENT_ID", GOOGLE_CLIENT_ID)
-                      .replace("__CLIENT_SECRET", GOOGLE_CLIENT_SECRET)
-                      .replace("__REDIRECT_URI", GOOGLE_REDIRECT_URI),
-                  );
-                  body = body
-                    .replace("__CLIENT_ID", GOOGLE_CLIENT_ID)
-                    .replace("__CLIENT_SECRET", GOOGLE_CLIENT_SECRET)
-                    .replace("__REDIRECT_URI", GOOGLE_REDIRECT_URI);
-                }
-                (async () => {
-                  const res = await fetch(url, {
-                    method: method,
-                    body: body,
-                    headers: headers,
-                  });
-                  const reply = {
-                    data: await res.json(),
-                    res_req_id: message.req_id,
-                  };
-                  console.log(reply);
-                  socket.send(JSON.stringify(reply));
-                })();
+              if (isWebRequestMessage(message)) {
+                void executeWebRequest(socket, message);
+              } else {
+                console.warn("Invalid web.request_json message", message);
               }
               return; // don't relay
           }

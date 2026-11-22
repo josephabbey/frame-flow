@@ -1,11 +1,29 @@
 import { AsyncEvent } from "../utils";
 
 const params = new URLSearchParams(location.search);
-export const FLOW_KEY = params.get("key")!;
+const key = params.get("key");
+if (!key) throw new Error("Missing flow key");
+export const FLOW_KEY = key;
 
 let reqId = 0;
 
-type RegisteredCallback = (payload: unknown) => void | Promise<void>;
+export type FlowMessage = { type: string } & Record<string, unknown>;
+
+function isFlowMessage(message: unknown): message is FlowMessage {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    typeof (message as FlowMessage).type === "string"
+  );
+}
+
+type RegisteredCallback = (payload: FlowMessage) => void | Promise<void>;
+
+interface OutstandingRequest {
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
 
 class FlowClient {
   private _connection: WebSocket | null = null;
@@ -13,11 +31,14 @@ class FlowClient {
   deviceConnected = new AsyncEvent();
 
   private registeredListeners: Record<string, RegisteredCallback> = {};
+  private outstandingReqs: Record<number, OutstandingRequest> = {};
 
-  private outstandingReqs: Record<
-    number,
-    { resolve: (v: unknown) => void; reject: (e: unknown) => void }
-  > = {};
+  // Reconnect-with-backoff state for the phone client. The frame may
+  // temporarily drop its Wi-Fi, and the server replaces the previous
+  // socket for a key when a newer one connects.
+  private _reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _reconnectAttempts = 0;
+  private readonly _maxReconnectAttempts = 10;
 
   websocketUrl(): string {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
@@ -27,20 +48,47 @@ class FlowClient {
   connect(): void {
     if (this._connection && this._connection.readyState < WebSocket.CLOSING)
       return;
-    this._connection?.close();
+    // Close any old socket explicitly; its close event must not trigger
+    // a reconnect because we are about to open a replacement.
+    const old = this._connection;
+    if (old) old.close();
+    this._connection = null;
     const socket = new WebSocket(this.websocketUrl());
     this._connection = socket;
-    socket.addEventListener("message", (event) => {
-      this._handleMessage(event);
-    });
+    socket.addEventListener("message", (event) => this._handleMessage(event));
     socket.addEventListener("open", () => {
       this.flowConnected.set();
+      // A successful (re)connect resets backoff.
+      this._reconnectAttempts = 0;
+      this._reconnectTimeout = null;
     });
     socket.addEventListener("close", () => {
+      // Only react to the closure of the socket we consider current;
+      // a socket closed to make way for a replacement is ignored.
+      if (this._connection !== socket) return;
       this.deviceConnected.clear();
       this.flowConnected.clear();
       this._connection = null;
+      for (const [reqIdVal, request] of Object.entries(this.outstandingReqs)) {
+        clearTimeout(request.timeout);
+        request.reject(new Error("Flow connection closed"));
+        delete this.outstandingReqs[Number(reqIdVal)];
+      }
+      this._scheduleReconnect();
     });
+  }
+
+  private _scheduleReconnect() {
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      console.warn("Flow: max reconnect attempts reached, giving up");
+      return;
+    }
+    const delay = Math.min(1000 * 2 ** this._reconnectAttempts, 30_000);
+    console.info(`Flow: reconnecting in ${delay}ms`);
+    this._reconnectTimeout = setTimeout(() => {
+      this._reconnectAttempts += 1;
+      this.connect();
+    }, delay);
   }
 
   register(msgType: string, callback: RegisteredCallback): () => void {
@@ -77,23 +125,35 @@ class FlowClient {
     const p = { ...payload };
     reqId += 1;
     p.req_id = reqId;
-    const { promise, resolve, reject } = Promise.withResolvers();
-    this.outstandingReqs[reqId] = { resolve, reject };
+    const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+    const timeout = setTimeout(() => {
+      const request = this.outstandingReqs[reqId];
+      if (request) {
+        request.reject(new Error("Flow request timed out"));
+        delete this.outstandingReqs[reqId];
+      }
+    }, 15_000);
+    this.outstandingReqs[reqId] = { resolve, reject, timeout };
     this._connection.send(JSON.stringify(p));
     return promise;
   }
 
-  async sendJsonRequest(payload: Record<string, unknown>): Promise<unknown> {
+  async sendJsonRequest<T = unknown>(
+    payload: Record<string, unknown>,
+  ): Promise<T> {
     await this.flowConnected.wait();
-    return this.sendJsonRequestNow(payload);
+    return (await this.sendJsonRequestNow(payload)) as T;
   }
 
-  async sendMessageRequest(
+  async sendMessageRequest<T = unknown>(
     messageType: string,
     fields: Record<string, unknown> = {},
-  ): Promise<unknown> {
+  ): Promise<T> {
     await this.flowConnected.wait();
-    return this.sendJsonRequestNow({ type: messageType, ...fields });
+    return (await this.sendJsonRequestNow({
+      type: messageType,
+      ...fields,
+    })) as T;
   }
 
   private _handleMessage(event: MessageEvent): void {
@@ -104,19 +164,18 @@ class FlowClient {
       return;
     }
     console.log(message);
-    if (typeof message !== "object" || message === null) return;
+    if (!isFlowMessage(message)) return;
 
-    const reqIdVal = message.res_req_id;
-    if (reqIdVal && this.outstandingReqs[reqIdVal]) {
-      const { resolve } = this.outstandingReqs[reqIdVal];
+    const reqIdVal = message.res_req_id as number | undefined;
+    if (reqIdVal !== undefined && this.outstandingReqs[reqIdVal]) {
+      const { resolve, timeout } = this.outstandingReqs[reqIdVal];
+      clearTimeout(timeout);
       delete this.outstandingReqs[reqIdVal];
       resolve(message);
       return;
     }
 
     const msgType = message.type;
-    if (typeof msgType !== "string") return;
-
     if (msgType === "device_connected") {
       console.log("Device Connected");
       this.deviceConnected.set();
@@ -138,7 +197,7 @@ class FlowClient {
 
     // keep special handling for google auth url
     if (msgType === "google.account.authorization_url") {
-      if ("url" in message && typeof message.url === "string") {
+      if (typeof message.url === "string") {
         console.log(message.url.replace("__KEY", FLOW_KEY));
         window.location.replace(message.url.replace("__KEY", FLOW_KEY));
       }

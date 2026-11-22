@@ -2,5 +2,15 @@ declare const process: {
   env: Record<string, string | undefined>;
 };
 
-export const GOOGLE_CLIENT_ID = process.env.BUN_PUBLIC_GOOGLE_CLIENT_ID!;
-export const GOOGLE_REDIRECT_URI = process.env.BUN_PUBLIC_GOOGLE_REDIRECT_URI!;
+function requiredPublicEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+
+export const GOOGLE_CLIENT_ID = requiredPublicEnv(
+  "BUN_PUBLIC_GOOGLE_CLIENT_ID",
+);
+export const GOOGLE_REDIRECT_URI = requiredPublicEnv(
+  "BUN_PUBLIC_GOOGLE_REDIRECT_URI",
+);

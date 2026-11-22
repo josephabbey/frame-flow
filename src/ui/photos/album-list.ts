@@ -8,24 +8,68 @@ import { FLOW_CLIENT } from "../../flow";
 import "@material/web/labs/card/elevated-card";
 import "@material/web/progress/linear-progress";
 
+export interface Album {
+  id: string;
+  title: string;
+  cover_photo_url: string;
+}
+
+interface ListAlbumsResponse {
+  albums: Album[];
+}
+
+interface PickerSelectResponse {
+  pickerUri: string;
+}
+
+function isAlbum(value: unknown): value is Album {
+  if (typeof value !== "object" || value === null) return false;
+  const album = value as Record<string, unknown>;
+  return (
+    typeof album.id === "string" &&
+    typeof album.title === "string" &&
+    typeof album.cover_photo_url === "string"
+  );
+}
+
+function isListAlbumsResponse(value: unknown): value is ListAlbumsResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const response = value as Record<string, unknown>;
+  return Array.isArray(response.albums) && response.albums.every(isAlbum);
+}
+
+function isPickerSelectResponse(value: unknown): value is PickerSelectResponse {
+  if (typeof value !== "object" || value === null) return false;
+  return typeof (value as Record<string, unknown>).pickerUri === "string";
+}
+
 @customElement("album-list")
 export class AlbumList extends LitElement {
   private _albums = new Task(this, {
     task: async () => {
       await FLOW_CLIENT.deviceConnected.wait();
-      return (await FLOW_CLIENT.sendMessageRequest("data.photos.list_albums"))
-        .albums as {}[];
+      const response = await FLOW_CLIENT.sendMessageRequest(
+        "data.photos.list_albums",
+      );
+      if (!isListAlbumsResponse(response)) {
+        throw new Error("Invalid album list response");
+      }
+      return response.albums;
     },
     args: () => [],
   });
 
   async addToAlbum(albumId: string) {
-    const { pickerUri } = await FLOW_CLIENT.sendMessageRequest(
+    const response = await FLOW_CLIENT.sendMessageRequest(
       "google.picker.select",
       {
         albumId,
       },
     );
+    if (!isPickerSelectResponse(response)) {
+      throw new Error("Invalid picker response");
+    }
+    const { pickerUri } = response;
 
     window.open(`${pickerUri}/autoclose`);
   }
