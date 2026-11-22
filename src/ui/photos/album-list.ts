@@ -1,6 +1,8 @@
 import { Task } from "@lit/task";
 import { css, html, LitElement } from "lit";
 import { customElement } from "lit/decorators.js";
+import { map } from "lit/directives/map.js";
+
 import { FLOW_CLIENT } from "../../flow";
 
 import "@material/web/labs/card/elevated-card";
@@ -34,7 +36,8 @@ export class AlbumList extends LitElement {
         html`<md-linear-progress indeterminate></md-linear-progress>`,
       complete: (albums) => html`
         <div class="album-list">
-          ${albums.map(
+          ${map(
+            albums,
             ({ id, title, cover_photo_url }) =>
               html`<md-elevated-card
                 role="button"

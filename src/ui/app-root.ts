@@ -10,19 +10,22 @@ import "./photos/album-list";
 import "./settings/settings-list";
 
 import { styles as typescaleStyles } from "@material/web/typography/md-typescale-styles.js";
-import { connect, FLOW_CLIENT, FLOW_KEY } from "../flow";
+import { FLOW_CLIENT, FLOW_KEY } from "../flow";
+import { ConnectionController } from "../flow/connection-controller";
 import { GOOGLE_CLIENT_ID, GOOGLE_REDIRECT_URI } from "../google";
 
 @customElement("app-root")
 export class AppRoot extends LitElement {
+  private connection = new ConnectionController(this);
+
   constructor() {
     super();
-    connect();
+    FLOW_CLIENT.connect();
   }
 
   async googleAuth() {
     let { url } = await FLOW_CLIENT.sendMessageRequest(
-      "google.account.authorization_url[get]",
+      "google.account.authorization_url",
     );
     url = url
       .replace("__CLIENT_ID", GOOGLE_CLIENT_ID)
@@ -33,23 +36,27 @@ export class AppRoot extends LitElement {
   protected render() {
     return html`
       <md-filled-card>
-        <h2>Frame Settings</h2>
-        <div>
-          <md-filled-button @click=${() => this.googleAuth()}>
-            Connect Google
-          </md-filled-button>
-          <md-filled-button
-            @click=${() => FLOW_CLIENT.sendMessage("google.picker.select", { maxItemCount: 5 })}
-          >
-            New Album
-          </md-filled-button>
-        </div>
+        ${
+          this.connection.deviceConnected
+            ? html`<h2>Frame Settings</h2>
+                <div>
+                  <md-filled-button @click=${() => this.googleAuth()}>
+                    Connect Google
+                  </md-filled-button>
+                  <md-filled-button
+                    @click=${() => FLOW_CLIENT.sendMessage("google.picker.select", { maxItemCount: 5 })}
+                  >
+                    New Album
+                  </md-filled-button>
+                </div>
 
-        <h2>Albums</h2>
-        <album-list></album-list>
+                <h2>Albums</h2>
+                <album-list></album-list>
 
-        <h2>Settings</h2>
-        <settings-list></settings-list>
+                <h2>Settings</h2>
+                <settings-list></settings-list>`
+            : html`<h2>Connecting...</h2>`
+        }
       </md-filled-card>
     `;
   }

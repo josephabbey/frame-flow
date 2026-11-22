@@ -1,6 +1,8 @@
 import type { ServerWebSocket } from "bun";
 import { createHash } from "crypto";
 import homepage from "../index.html";
+import LICENSE from "../LICENSE" with { type: "text" };
+import pairpage from "../pair.html";
 
 const GOOGLE_CLIENT_ID = Bun.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = Bun.env.GOOGLE_CLIENT_SECRET!;
@@ -15,6 +17,8 @@ const server = Bun.serve({
   port: Number(process.env.PORT || 3000),
   routes: {
     "/": homepage,
+    "/pair": pairpage,
+    "/LICENSE": new Response(LICENSE),
   },
   async fetch(request, server) {
     const url = new URL(request.url);

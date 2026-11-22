@@ -1,6 +1,8 @@
 import { Task } from "@lit/task";
 import { css, html, LitElement } from "lit";
 import { customElement } from "lit/decorators.js";
+import { map } from "lit/directives/map.js";
+
 import { FLOW_CLIENT } from "../../flow";
 
 import "@material/web/progress/linear-progress";
@@ -22,10 +24,12 @@ export class SettingsList extends LitElement {
       pending: () =>
         html`<md-linear-progress indeterminate></md-linear-progress>`,
       complete: (components) =>
-        html`${Object.entries(components).map(
+        html`${map(
+          Object.entries(components),
           ([component_key, component]) =>
             html`<h3>${component.name}</h3>
-              ${Object.entries(component.details).map(
+              ${map(
+                Object.entries(component.details),
                 ([key, { name, value, type }]) =>
                   html`<md-outlined-text-field
                     label="${name}"

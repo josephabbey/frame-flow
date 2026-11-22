@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot api/server.ts",
-    "build": "bun build ./index.html --outdir=dist --env=inline",
+    "build": "bun build ./index.html ./pair.html --outdir=dist --env=inline",
     "vercel-build": "bun run build",
     "lint": "bunx eslint src api",
     "format": "bun fmt .",
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@fontsource/roboto": "^5.3.0",
+    "@improv-wifi/ble-sdk": "2",
     "@lit/task": "^1.0.3",
     "@material/material-color-utilities": "^0.4.0",
     "@material/web": "^2.5.0",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
+    "@types/web-bluetooth": "^0.0.22",
     "bun-types": "^1.4.4",
     "eslint": "^9.39.0",
     "ts-lit-plugin": "^2.0.2",

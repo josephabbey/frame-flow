@@ -160,10 +160,6 @@ class FlowClient {
 export const FLOW_CLIENT = new FlowClient();
 window.FLOW_CLIENT = FLOW_CLIENT;
 
-export function connect(): void {
-  FLOW_CLIENT.connect();
-}
-
 declare global {
   interface Window {
     FLOW_CLIENT: FlowClient;
