@@ -1,5 +1,5 @@
-import { customElement } from "lit/decorators.js";
 import { css, html, LitElement } from "lit-element";
+import { customElement } from "lit/decorators.js";
 
 import "@material/web/button/filled-button";
 import "@material/web/divider/divider";
@@ -52,7 +52,7 @@ export class AppRoot extends LitElement {
                     Connect Google
                   </md-filled-button>
                   <md-filled-button
-                    @click=${() => FLOW_CLIENT.sendMessage("google.picker.select", { maxItemCount: 5 })}
+                    @click=${() => FLOW_CLIENT.sendMessage("google.picker.select", {})}
                   >
                     New Album
                   </md-filled-button>

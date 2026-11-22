@@ -106,6 +106,7 @@ export class AlbumList extends LitElement {
       display: flex;
       flex-direction: row;
       flex-wrap: wrap;
+      gap: 1em;
 
       > md-elevated-card {
         width: 10em;
